@@ -111,7 +111,15 @@ def convert_tools(
     function tool is declared as the provider's native ``{"type":
     "web_search"}`` tool instead of a function schema: the server runs the
     search mid-generation and the response carries ``web_search_call`` items
-    with ``url_citation`` annotations rather than a function call.
+    with ``url_citation`` annotations rather than a function call. That early
+    return is unchanged: hosted tools stay provider-native and do not receive
+    function-only fields such as ``strict``.
+
+    ``strict`` is unset when the key is omitted or the value is ``None``, and
+    an unset flag is omitted from the converted schema. An explicit boolean is
+    copied, including ``False`` — presence matters, so a falsy value is not
+    treated as absent. Parameter normalization is otherwise unchanged: a
+    missing, non-dictionary, or empty ``parameters`` value becomes ``{}``.
     """
     converted: list[dict[str, Any]] = []
     for tool in tools:
@@ -123,14 +131,16 @@ def convert_tools(
             converted.append({"type": "web_search"})
             continue
         params = fn.get("parameters") or {}
-        converted.append(
-            {
-                "type": "function",
-                "name": name,
-                "description": fn.get("description") or "",
-                "parameters": params if isinstance(params, dict) else {},
-            }
-        )
+        schema: dict[str, Any] = {
+            "type": "function",
+            "name": name,
+            "description": fn.get("description") or "",
+            "parameters": params if isinstance(params, dict) else {},
+        }
+        # Key presence, not truthiness: ``strict=False`` is an explicit choice.
+        if "strict" in fn and isinstance(fn["strict"], bool):
+            schema["strict"] = fn["strict"]
+        converted.append(schema)
     return converted
 
 

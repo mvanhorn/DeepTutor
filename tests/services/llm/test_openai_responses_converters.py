@@ -6,6 +6,7 @@ from deeptutor.services.llm.provider_core.openai_responses import (
     adapt_chat_kwargs_to_responses,
     convert_messages,
     convert_tool_choice,
+    convert_tools,
 )
 
 
@@ -116,3 +117,96 @@ class TestConvertToolChoice:
     def test_a_function_choice_with_no_name_is_not_invented(self) -> None:
         choice = {"type": "function", "function": {}}
         assert convert_tool_choice(choice) == choice
+
+
+class TestConvertTools:
+    """Explicit ``strict`` survives conversion; unset and hosted tools do not gain it."""
+
+    def test_preserves_explicit_boolean_strict(self) -> None:
+        parameters = {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        }
+        for strict in (False, True):
+            converted = convert_tools(
+                [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "demo_search",
+                            "description": "Search a synthetic demo.",
+                            "strict": strict,
+                            "parameters": parameters,
+                        },
+                    }
+                ]
+            )
+            assert converted == [
+                {
+                    "type": "function",
+                    "name": "demo_search",
+                    "description": "Search a synthetic demo.",
+                    "parameters": parameters,
+                    "strict": strict,
+                }
+            ]
+
+    def test_omits_strict_when_missing_or_null(self) -> None:
+        parameters = {"type": "object", "properties": {"query": {"type": "string"}}}
+        expected = [
+            {
+                "type": "function",
+                "name": "demo_search",
+                "description": "Search a synthetic demo.",
+                "parameters": parameters,
+            }
+        ]
+        without_key = {
+            "name": "demo_search",
+            "description": "Search a synthetic demo.",
+            "parameters": parameters,
+        }
+        assert convert_tools([{"type": "function", "function": without_key}]) == expected
+        assert (
+            convert_tools([{"type": "function", "function": {**without_key, "strict": None}}])
+            == expected
+        )
+
+    def test_native_web_search_stays_a_hosted_tool(self) -> None:
+        converted = convert_tools(
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "Search the web.",
+                        "strict": False,
+                        "parameters": {"type": "object"},
+                    },
+                }
+            ],
+            native_web_search=True,
+        )
+        assert converted == [{"type": "web_search"}]
+
+    def test_normalizes_missing_non_dict_and_empty_parameters(self) -> None:
+        expected = [
+            {
+                "type": "function",
+                "name": "demo_search",
+                "description": "Search a synthetic demo.",
+                "parameters": {},
+            }
+        ]
+        missing = {"name": "demo_search", "description": "Search a synthetic demo."}
+        assert convert_tools([{"type": "function", "function": missing}]) == expected
+        assert (
+            convert_tools([{"type": "function", "function": {**missing, "parameters": {}}}])
+            == expected
+        )
+        assert (
+            convert_tools([{"type": "function", "function": {**missing, "parameters": ["query"]}}])
+            == expected
+        )
